@@ -1,0 +1,97 @@
+# Test de Deployment basico
+# probar en url http://spb.127-0-0-1.sslip.io
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  labels:
+    app: spb
+  name: spb-secret
+type: Opaque
+stringData:
+   svarmessage: "Varmessage en Secret"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+      application: spb
+  name: spb-cm
+data:
+  application.properties: |
+    ## Podemos activar descomentando. Tiene prioridad sobre application.properties interno
+    #greeter.message="Desde configmap"
+    greeter.varmessage=Desde cm ${VARMESSAGE:"no hay nada en VARMESSAGE"}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: spb
+  name: spb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spb
+  template:
+    metadata:
+      labels:
+        app: spb
+    spec:
+      containers:
+        - image: mycluster-registry:5000/spb:1.0
+          name: spb
+          # con "Allways" podemos reutilizar el tag del contenedor. 
+          imagePullPolicy: Always
+          env:
+            - name: VARMESSAGE
+              valueFrom: 
+                secretKeyRef:
+                  name: spb-secret
+                  key: svarmessage
+          volumeMounts:
+          - name: application-config
+            # Si app.jar esta en "/" y montamos en "/config" usa el fichero "application.properties" del configmap automaticamente
+            mountPath: "/config"
+            readOnly: true
+          ports:
+            - containerPort: 8080
+      volumes:
+      - name: application-config
+        configMap:
+          name:  spb-cm
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spb-svc
+spec:
+  type: ClusterIP
+  selector:
+    app: spb
+  ports:
+    - port: 8080
+---    
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: spb-http
+  annotations:
+    ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+    - host: spb.127-0-0-1.sslip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: spb-svc
+                port:
+                  number: 8080
